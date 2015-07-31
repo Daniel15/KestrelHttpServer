@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -28,6 +29,7 @@ namespace Microsoft.AspNet.Server.Kestrel.Http
         private bool _resultStarted;
         private bool _responseStarted;
         private bool _keepAlive;
+        private bool _autoChunk = false;
         private readonly FrameRequestHeaders _requestHeaders = new FrameRequestHeaders();
         private readonly FrameResponseHeaders _responseHeaders = new FrameResponseHeaders();
 
@@ -235,6 +237,12 @@ namespace Microsoft.AspNet.Server.Kestrel.Http
             try
             {
                 await Application.Invoke(this);
+
+                if (_autoChunk)
+                {
+                    WriteChunkPrefix(numOctets: 0);
+                    WriteChunkSuffix();
+                }
             }
             catch (Exception ex)
             {
@@ -247,11 +255,53 @@ namespace Microsoft.AspNet.Server.Kestrel.Http
             }
         }
 
-
         public void Write(ArraySegment<byte> data, Action<Exception, object> callback, object state)
         {
             ProduceStart(immediate: false);
-            SocketOutput.Write(data, callback, state);
+
+            if (_autoChunk)
+            {
+                WriteChunkPrefix(data.Count);
+            }
+
+            SocketOutput.Write(data, callback, state, immediate: !_autoChunk);
+
+            if (_autoChunk)
+            {
+                WriteChunkSuffix();
+            }
+        }
+
+        private void WriteChunkPrefix(int numOctets)
+        {
+            var numOctetBytes = CreateAsciiByteArraySegment(numOctets.ToString("x") + "\r\n");
+
+            SocketOutput.Write(numOctetBytes,
+                    (error, _) =>
+                    {
+                        if (error != null)
+                        {
+                            Trace.WriteLine("WriteChunkPrefix" + error.ToString());
+                        }
+                    },
+                    null,
+                    immediate: false);
+        }
+
+        private static readonly ArraySegment<byte> _endChunkBytes = CreateAsciiByteArraySegment("\r\n");
+
+        private void WriteChunkSuffix()
+        {
+            SocketOutput.Write(_endChunkBytes,
+                (error, _) =>
+                {
+                    if (error != null)
+                    {
+                        Trace.WriteLine("WriteChunkSuffix" + error.ToString());
+                    }
+                },
+                null,
+                immediate: true);
         }
 
         public void Upgrade(IDictionary<string, object> options, Func<object, Task> callback)
@@ -405,9 +455,17 @@ namespace Microsoft.AspNet.Server.Kestrel.Http
                 }
             }
 
-            if (hasTransferEncoding == false && hasContentLength == false)
+            if (_keepAlive && !hasTransferEncoding && !hasContentLength)
             {
-                _keepAlive = false;
+                if (HttpVersion == "HTTP/1.1")
+                {
+                    _autoChunk = true;
+                    writer.Write("Transfer-Encoding: chunked\r\n");
+                }
+                else
+                {
+                    _keepAlive = false;
+                }
             }
             if (_keepAlive == false && hasConnection == false && HttpVersion == "HTTP/1.1")
             {
