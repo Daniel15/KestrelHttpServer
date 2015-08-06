@@ -64,22 +64,7 @@ namespace Microsoft.AspNet.Server.Kestrel.Http
                                             return;
                                         }
 
-                                        var acceptSocket = new UvTcpHandle();
-                                        acceptSocket.Init(Thread.Loop, Thread.QueueCloseHandle);
-
-                                        try
-                                        {
-                                            DispatchPipe.Accept(acceptSocket);
-                                        }
-                                        catch (Exception ex)
-                                        {
-                                            Trace.WriteLine("DispatchPipe.Accept " + ex.Message);
-                                            acceptSocket.Dispose();
-                                            return;
-                                        }
-
-                                        var connection = new Connection(this, acceptSocket);
-                                        connection.Start();
+                                        AcceptDispatchPipe();
                                     },
                                     null);
 
@@ -112,6 +97,30 @@ namespace Microsoft.AspNet.Server.Kestrel.Http
             {
                 Thread.Send(_ => DispatchPipe.Dispose(), null);
             }
+        }
+
+        private void AcceptDispatchPipe()
+        {
+            var acceptSocket = new UvTcpHandle();
+            acceptSocket.Init(Thread.Loop, Thread.QueueCloseHandle);
+            try
+            {
+                if (DispatchPipe.Accept(acceptSocket) == Libuv.AcceptStatus.EAGAIN)
+                {
+                    Thread.Post(l => ((ListenerSecondary)l).AcceptDispatchPipe(), this);
+                    acceptSocket.Dispose();
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Trace.WriteLine("DispatchPipe.Accept " + ex.Message);
+                acceptSocket.Dispose();
+                return;
+            }
+
+            var connection = new Connection(this, acceptSocket);
+            connection.Start();
         }
     }
 }

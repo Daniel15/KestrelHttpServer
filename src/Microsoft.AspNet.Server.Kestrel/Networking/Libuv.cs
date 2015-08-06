@@ -233,11 +233,19 @@ namespace Microsoft.AspNet.Server.Kestrel.Networking
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         protected delegate int uv_accept(UvStreamHandle server, UvStreamHandle client);
         protected uv_accept _uv_accept = default(uv_accept);
-        public void accept(UvStreamHandle server, UvStreamHandle client)
+        public AcceptStatus accept(UvStreamHandle server, UvStreamHandle client)
         {
             server.Validate();
             client.Validate();
-            Check(_uv_accept(server, client));
+
+            var result = _uv_accept(server, client);
+            if (result == (int)AcceptStatus.EAGAIN)
+            {
+                return AcceptStatus.EAGAIN;
+            }
+
+            Check(result);
+            return AcceptStatus.Success;
         }
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -457,9 +465,11 @@ namespace Microsoft.AspNet.Server.Kestrel.Networking
             GETADDRINFO,
             GETNAMEINFO,
         }        
-        //int handle_size_async;
-        //int handle_size_tcp;
-        //int req_size_write;
-        //int req_size_shutdown;
+
+        public enum AcceptStatus
+        {
+            Success = 0,
+            EAGAIN = -4088
+        }
     }
 }

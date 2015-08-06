@@ -60,9 +60,9 @@ namespace Microsoft.AspNet.Server.Kestrel.Networking
             }
         }
 
-        public void Accept(UvStreamHandle handle)
+        public Libuv.AcceptStatus Accept(UvStreamHandle handle)
         {
-            _uv.accept(this, handle);
+            return _uv.accept(this, handle);
         }
 
         public void ReadStart(
