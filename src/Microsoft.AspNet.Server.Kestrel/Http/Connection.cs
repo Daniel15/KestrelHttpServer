@@ -15,6 +15,9 @@ namespace Microsoft.AspNet.Server.Kestrel.Http
         private static readonly Action<UvStreamHandle, int, Exception, object> _readCallback = ReadCallback;
         private static readonly Func<UvStreamHandle, int, object, Libuv.uv_buf_t> _allocCallback = AllocCallback;
 
+        private bool _shutdownSent;
+        private bool _socketClosed;
+
         private static Libuv.uv_buf_t AllocCallback(UvStreamHandle handle, int suggestedSize, object state)
         {
             return ((Connection)state).OnAlloc(handle, suggestedSize);
@@ -101,10 +104,16 @@ namespace Microsoft.AspNet.Server.Kestrel.Http
 
         void IConnectionControl.End(ProduceEndType endType)
         {
+            if (_socketClosed || (_shutdownSent && endType != ProduceEndType.SocketDisconnect))
+            {
+                return;
+            }
+
             switch (endType)
             {
                 case ProduceEndType.SocketShutdownSend:
                     KestrelTrace.Log.ConnectionWriteFin(_connectionId, 0);
+                    _shutdownSent = true;
                     Thread.Post(
                         x =>
                         {
@@ -129,6 +138,7 @@ namespace Microsoft.AspNet.Server.Kestrel.Http
                     break;
                 case ProduceEndType.SocketDisconnect:
                     KestrelTrace.Log.ConnectionDisconnect(_connectionId);
+                    _socketClosed = true;
                     Thread.Post(
                         x =>
                         {
